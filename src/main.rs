@@ -4,13 +4,19 @@
     slice_patterns
 )]
 
-const NUM_LOCALS: usize = 4;
-const MAX_INSTS: usize = 4;
+const NUM_LOCALS: usize = 3;
+const MAX_INSTS: usize = 10;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Type {
     from: usize,
     to: usize,
+}
+
+impl Type {
+    fn subtype(&self, other: &Type) -> bool {
+        self.from <= other.from && self.to >= other.to
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +98,7 @@ fn increment_program(
     // and consumes no more than `stack_size` elements.
     fn increment_inst(
         inst: &mut Inst,
-        stack_size: usize,
+        stack_type: Type,
         max_size: usize,
         max_local: u8,
     ) -> Option<()> {
@@ -119,7 +125,7 @@ fn increment_program(
                 Inst::If(mut left, mut right) => {
                     if increment_program(
                         &mut left,
-                        stack_size,
+                        stack_type.from,
                         max_size - 1 - get_size(&right),
                     )
                     .is_some()
@@ -127,7 +133,7 @@ fn increment_program(
                         Inst::If(left, right)
                     } else if increment_program(
                         &mut right,
-                        stack_size,
+                        stack_type.from,
                         max_size - 1 - get_size(&left),
                     )
                     .is_some()
@@ -139,7 +145,7 @@ fn increment_program(
                     }
                 }
             };
-            if curr.get_type().from <= stack_size {
+            if curr.get_type().subtype(&stack_type) {
                 *inst = curr;
                 return Some(());
             }
@@ -162,9 +168,13 @@ fn increment_program(
             }
             [ref mut first, rest..] => {
                 let inst_size = max_size - size - get_size(rest);
+                let stack_type = Type {
+                    from: stack_size,
+                    to: get_type(rest).from,
+                };
                 match increment_inst(
                     first,
-                    stack_size,
+                    stack_type,
                     inst_size,
                     next_local(rest),
                 ) {
@@ -206,7 +216,7 @@ fn main() {
     let mut count = 0;
     while increment_program(&mut program, 0, MAX_INSTS).is_some() {
         count += 1;
-        println!("Program {:}: {:#?}", count, program);
+        println!("{:?}", program);
     }
     println!("{:}", count);
 }
