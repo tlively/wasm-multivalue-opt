@@ -123,21 +123,17 @@ fn increment_program(
                 }
                 Inst::Op(_) => Inst::If(Vec::new(), Vec::new()),
                 Inst::If(mut left, mut right) => {
-                    if increment_program(
+                    if let Some(_) = increment_program(
                         &mut left,
                         stack_type.from,
                         max_size - 1 - get_size(&right),
-                    )
-                    .is_some()
-                    {
+                    ) {
                         Inst::If(left, right)
-                    } else if increment_program(
+                    } else if let Some(_) = increment_program(
                         &mut right,
                         stack_type.from,
                         max_size - 1 - get_size(&left),
-                    )
-                    .is_some()
-                    {
+                    ) {
                         left.clear();
                         Inst::If(left, right)
                     } else {
