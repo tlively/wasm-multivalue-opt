@@ -109,12 +109,15 @@ fn increment_program(
                 Inst::Get(_) => Inst::Set(0),
                 Inst::Set(n) if n < max_local => Inst::Set(n + 1),
                 Inst::Set(_) => Inst::Drop,
-                Inst::Drop => Inst::Op(Type { from: 2, to: 1 }),
-                Inst::Op(Type { from, to }) if from < NUM_LOCALS => {
+                Inst::Drop => Inst::Op(Type {
+                    from: 2,
+                    to: usize::max(stack_type.to, 1),
+                }),
+                Inst::Op(Type { from, to }) if from < stack_type.from => {
                     Inst::Op(Type { from: from + 1, to })
                 }
                 Inst::Op(Type { from, to })
-                    if from == NUM_LOCALS && to < NUM_LOCALS =>
+                    if from >= stack_type.from && to < NUM_LOCALS =>
                 {
                     Inst::Op(Type {
                         from: 2,
