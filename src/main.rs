@@ -127,7 +127,7 @@ fn increment_program(
                     if stack_type.from >= 2 {
                         Inst::Op(Type {
                             from: 2,
-                            to: usize::max(stack_type.to, 1),
+                            to: usize::max(stack_type.to, 1).min(NUM_LOCALS),
                         })
                     } else if stack_type.from >= 1 {
                         Inst::If(Vec::new(), Vec::new())
@@ -136,9 +136,10 @@ fn increment_program(
                     }
                 }
                 Inst::Op(Type { from, to }) => {
-                    if from < stack_type.from && to >= stack_type.to {
+                    let max_from = usize::min(stack_type.from, NUM_LOCALS);
+                    if from < max_from && to >= stack_type.to {
                         Inst::Op(Type { from: from + 1, to })
-                    } else if from >= stack_type.from && to < NUM_LOCALS {
+                    } else if from >= max_from && to < NUM_LOCALS {
                         Inst::Op(Type {
                             from: 2,
                             to: to + 1,
