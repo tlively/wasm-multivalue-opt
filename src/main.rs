@@ -4,11 +4,11 @@
     slice_patterns
 )]
 
-const NUM_LOCALS: usize = 3;
-const MAX_INSTS: usize = 10;
+pub const NUM_LOCALS: usize = 3;
+pub const MAX_INSTS: usize = 7;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-struct Type {
+pub struct Type {
     from: usize,
     to: usize,
 }
@@ -20,7 +20,7 @@ impl Type {
 }
 
 #[derive(Debug, Clone)]
-enum Inst {
+pub enum Inst {
     Get(u8),
     Set(u8),
     Drop,
@@ -36,7 +36,7 @@ impl Inst {
             Self::Drop => Type { from: 1, to: 0 },
             Self::Op(t) => t.clone(),
             Self::If(e1, e2) => {
-                let (t1, t2) = (get_type(e1), get_type(e2));
+                let (t1, t2) = (program::get_type(e1), program::get_type(e2));
                 Type {
                     from: 1 + usize::max(t1.from, t2.from),
                     to: usize::min(t1.to, t2.to),
@@ -47,39 +47,39 @@ impl Inst {
 
     fn get_size(&self) -> usize {
         match self {
-            Self::If(left, right) => 1 + get_size(left) + get_size(right),
+            Self::If(left, right) => {
+                1 + program::get_size(left) + program::get_size(right)
+            }
             _ => 1,
         }
     }
 }
 
-fn get_type(program: &[Inst]) -> Type {
-    let mut stack_size: i32 = 0;
-    let mut min_size: i32 = 0;
-    for inst in program {
-        let t = inst.get_type();
-        stack_size -= t.from as i32;
-        min_size = min_size.min(stack_size);
-        stack_size += t.to as i32;
-    }
-    Type {
-        from: -min_size as usize,
-        to: stack_size as usize,
-    }
-}
+mod program {
+    pub use super::{Inst, Type, NUM_LOCALS};
 
-fn get_size(program: &[Inst]) -> usize {
-    match program {
-        [] => 0,
-        [first, rest..] => first.get_size() + get_size(rest),
+    pub fn get_type(program: &[Inst]) -> Type {
+        let mut stack_size: i32 = 0;
+        let mut min_size: i32 = 0;
+        for inst in program {
+            let t = inst.get_type();
+            stack_size -= t.from as i32;
+            min_size = min_size.min(stack_size);
+            stack_size += t.to as i32;
+        }
+        Type {
+            from: -min_size as usize,
+            to: stack_size as usize,
+        }
     }
-}
 
-fn increment_program(
-    program: &mut Vec<Inst>,
-    mut stack_size: usize,
-    max_size: usize,
-) -> Option<()> {
+    pub fn get_size(program: &[Inst]) -> usize {
+        match program {
+            [] => 0,
+            [first, rest..] => first.get_size() + get_size(rest),
+        }
+    }
+
     // calculate the largest local index we are allowed to use, which
     // is the lesser of the largest local index and one more than the
     // largest used local index.
@@ -93,9 +93,11 @@ fn increment_program(
         }
     }
 
-    // Find the next available instruction that contains a local index
-    // not greater than `max_local`, is not larger than `max_size`,
-    // and consumes no more than `stack_size` elements.
+    // Find the next available instruction that contains a local
+    // index not greater than `max_local`, is not larger than
+    // `max_size`, and consumes no more than `stack_size`
+    // elements. Skip trying instructions that would require more
+    // stack values than are available.
     fn increment_inst(
         inst: &mut Inst,
         stack_type: Type,
@@ -153,13 +155,13 @@ fn increment_program(
                 Inst::If(mut left, mut right) => {
                     if stack_type.from < 1 {
                         return None;
-                    } else if let Some(_) = increment_program(
+                    } else if let Some(_) = increment(
                         &mut left,
                         stack_type.from - 1,
                         max_size - 1 - get_size(&right),
                     ) {
                         Inst::If(left, right)
-                    } else if let Some(_) = increment_program(
+                    } else if let Some(_) = increment(
                         &mut right,
                         stack_type.from - 1,
                         max_size - 1 - get_size(&left),
@@ -178,46 +180,74 @@ fn increment_program(
         }
     }
 
-    // Increment first element. If that wraps, recurse on next
-    // element. If there is no next element, add a new element.
-    let mut curr: &mut [Inst] = program;
-    let mut size = 0;
-    loop {
-        match curr {
-            [] => {
-                if get_size(&program) < max_size {
-                    program.push(Inst::Get(0));
-                    return Some(());
-                } else {
-                    return None;
-                }
-            }
-            [ref mut first, rest..] => {
-                let inst_size = max_size - size - get_size(rest);
-                let stack_type = Type {
-                    from: stack_size,
-                    to: get_type(rest).from,
-                };
-                match increment_inst(
-                    first,
-                    stack_type,
-                    inst_size,
-                    next_local(rest),
-                ) {
-                    Some(_) => {
+    pub fn increment(
+        program: &mut Vec<Inst>,
+        mut stack_size: usize,
+        max_size: usize,
+    ) -> Option<()> {
+        // Increment first element. If that wraps, recurse on next
+        // element. If there is no next element, add a new element.
+        let mut curr: &mut [Inst] = program;
+        let mut size = 0;
+        loop {
+            match curr {
+                [] => {
+                    if get_size(&program) < max_size {
+                        program.push(Inst::Get(0));
                         return Some(());
+                    } else {
+                        return None;
                     }
-                    None => {
-                        *first = Inst::Get(0);
-                        size += first.get_size();
-                        let t = first.get_type();
-                        stack_size -= t.from;
-                        stack_size += t.to;
-                        curr = rest;
+                }
+                [ref mut first, rest..] => {
+                    let inst_size = max_size - size - get_size(rest);
+                    let stack_type = Type {
+                        from: stack_size,
+                        to: get_type(rest).from,
+                    };
+                    match increment_inst(
+                        first,
+                        stack_type,
+                        inst_size,
+                        next_local(rest),
+                    ) {
+                        Some(_) => {
+                            return Some(());
+                        }
+                        None => {
+                            *first = Inst::Get(0);
+                            size += first.get_size();
+                            let t = first.get_type();
+                            stack_size -= t.from;
+                            stack_size += t.to;
+                            curr = rest;
+                        }
                     }
                 }
             }
         }
+    }
+
+    pub fn multivalue(program: &[Inst]) -> bool {
+        fn multivalue_with_stack(program: &[Inst], stack_size: usize) -> bool {
+            match program {
+                [] => false,
+                [first, rest..] => {
+                    let t = first.get_type();
+                    if let Inst::If(left, right) = first {
+                        if t.from > 1
+                            || t.to >= 1
+                            || multivalue_with_stack(&left, stack_size - 1)
+                            || multivalue_with_stack(&right, stack_size - 1)
+                        {
+                            return true;
+                        }
+                    }
+                    multivalue_with_stack(rest, stack_size - t.from + t.to)
+                }
+            }
+        }
+        multivalue_with_stack(program, 0)
     }
 }
 
@@ -240,9 +270,11 @@ struct Instantiation {
 fn main() {
     let mut program = Vec::<Inst>::new();
     let mut count = 0;
-    while increment_program(&mut program, 0, MAX_INSTS).is_some() {
+    while program::increment(&mut program, 0, MAX_INSTS).is_some() {
         count += 1;
-        println!("{:?}", program);
+        if program::multivalue(&program) {
+            println!("{:?}", program);
+        }
     }
     println!("{:}", count);
 }
