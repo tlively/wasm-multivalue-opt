@@ -105,36 +105,62 @@ fn increment_program(
         let mut curr: Inst = inst.clone();
         loop {
             curr = match curr {
-                Inst::Get(n) if n < max_local => Inst::Get(n + 1),
-                Inst::Get(_) => Inst::Set(0),
-                Inst::Set(n) if n < max_local => Inst::Set(n + 1),
-                Inst::Set(_) => Inst::Drop,
-                Inst::Drop => Inst::Op(Type {
-                    from: 2,
-                    to: usize::max(stack_type.to, 1),
-                }),
-                Inst::Op(Type { from, to }) if from < stack_type.from => {
-                    Inst::Op(Type { from: from + 1, to })
+                Inst::Get(n) => {
+                    if n < max_local {
+                        Inst::Get(n + 1)
+                    } else if stack_type.from >= 1 {
+                        Inst::Set(0)
+                    } else {
+                        return None;
+                    }
                 }
-                Inst::Op(Type { from, to })
-                    if from >= stack_type.from && to < NUM_LOCALS =>
-                {
-                    Inst::Op(Type {
-                        from: 2,
-                        to: to + 1,
-                    })
+                Inst::Set(n) => {
+                    if stack_type.from >= 1 && n < max_local {
+                        Inst::Set(n + 1)
+                    } else if stack_type.from >= 1 {
+                        Inst::Drop
+                    } else {
+                        return None;
+                    }
                 }
-                Inst::Op(_) => Inst::If(Vec::new(), Vec::new()),
+                Inst::Drop => {
+                    if stack_type.from >= 2 {
+                        Inst::Op(Type {
+                            from: 2,
+                            to: usize::max(stack_type.to, 1),
+                        })
+                    } else if stack_type.from >= 1 {
+                        Inst::If(Vec::new(), Vec::new())
+                    } else {
+                        return None;
+                    }
+                }
+                Inst::Op(Type { from, to }) => {
+                    if from < stack_type.from && to >= stack_type.to {
+                        Inst::Op(Type { from: from + 1, to })
+                    } else if from >= stack_type.from && to < NUM_LOCALS {
+                        Inst::Op(Type {
+                            from: 2,
+                            to: to + 1,
+                        })
+                    } else if stack_type.from >= 1 {
+                        Inst::If(Vec::new(), Vec::new())
+                    } else {
+                        return None;
+                    }
+                }
                 Inst::If(mut left, mut right) => {
-                    if let Some(_) = increment_program(
+                    if stack_type.from < 1 {
+                        return None;
+                    } else if let Some(_) = increment_program(
                         &mut left,
-                        stack_type.from,
+                        stack_type.from - 1,
                         max_size - 1 - get_size(&right),
                     ) {
                         Inst::If(left, right)
                     } else if let Some(_) = increment_program(
                         &mut right,
-                        stack_type.from,
+                        stack_type.from - 1,
                         max_size - 1 - get_size(&left),
                     ) {
                         left.clear();
