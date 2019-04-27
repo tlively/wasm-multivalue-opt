@@ -251,20 +251,66 @@ mod program {
     }
 }
 
-#[derive(Debug)]
-enum AbstractVal {
-    Val(u8),
-    Combined(u8, Vec<AbstractVal>),
-}
+mod interpret {
+    pub use super::{Inst, Type, NUM_LOCALS};
 
-struct Config {
-    locals: [AbstractVal; NUM_LOCALS as usize],
-    stack: Vec<AbstractVal>,
-}
+    #[derive(Debug, Clone)]
+    pub enum AbstractVal {
+        Val(u8),
+        Combined(u8, Vec<AbstractVal>),
+    }
 
-struct Instantiation {
-    assignees: Vec<AbstractVal>,
-    configs: Vec<Config>,
+    impl Default for AbstractVal {
+        fn default() -> AbstractVal {
+            AbstractVal::Val(0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Config {
+        locals: [AbstractVal; NUM_LOCALS],
+        stack: Vec<AbstractVal>,
+    }
+
+    pub struct Instantiation {
+        assignees: Vec<AbstractVal>,
+        configs: Vec<Config>,
+    }
+
+    fn interpret_with_config(
+        program: &[Inst],
+        mut config: Config,
+    ) -> Instantiation {
+        match program {
+            [] => {
+                return Instantiation {
+                    assignees: Vec::new(),
+                    configs: vec![config],
+                }
+            }
+            [Inst::Get(n), rest..] => {
+                config.stack.push(config.locals[*n as usize].clone());
+                interpret_with_config(rest, config)
+            }
+            // TODO: others
+        }
+    }
+
+    pub fn interpret(program: &[Inst]) -> Instantiation {
+        let locals = {
+            let mut locals: [AbstractVal; NUM_LOCALS] = Default::default();
+            for i in 0..NUM_LOCALS {
+                locals[i] = AbstractVal::Val(i as u8);
+            }
+            locals
+        };
+        let config = Config {
+            locals,
+            stack: Vec::new(),
+        };
+        interpret_with_config(program, config)
+    }
+
 }
 
 fn main() {
