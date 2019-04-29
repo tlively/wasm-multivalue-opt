@@ -5,3 +5,4 @@ authors = ["Thomas Lively <tlively@google.com>"]
 edition = "2018"
 
 [dependencies]
+bit-vec = "0.5.1"
