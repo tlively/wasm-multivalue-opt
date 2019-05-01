@@ -1,5 +1,6 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::fmt;
+use std::iter::Iterator;
 
 use super::{MAX_INSTS, NUM_LOCALS};
 
@@ -53,6 +54,12 @@ impl Inst {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
     pub insts: Vec<Inst>,
+}
+
+impl AsRef<[Inst]> for Program {
+    fn as_ref(&self) -> &[Inst] {
+        &self.insts
+    }
 }
 
 impl Ord for Program {
@@ -232,7 +239,10 @@ impl Program {
                     if let Some(_) = left.increment_with_params(
                         stack_type.from - 1,
                         max_size - 1 - right.get_size(),
-                        max_local,
+                        u32::max(
+                            max_local,
+                            Program::next_local_insts(&right.insts),
+                        ),
                     ) {
                         Inst::If(left, right)
                     } else if let Some(_) = right.increment_with_params(
@@ -323,7 +333,7 @@ impl Program {
                     let t = first.get_type();
                     if let Inst::If(left, right) = first {
                         if t.from > 1
-                            || t.to >= 1
+                            || t.to > 1
                             || multivalue_with_stack(
                                 &left.insts,
                                 stack_size - 1,

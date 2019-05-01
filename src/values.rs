@@ -1,5 +1,5 @@
 use bit_vec::BitVec;
-use std::iter;
+use std::{fmt, iter};
 
 use super::NUM_LOCALS;
 
@@ -41,6 +41,16 @@ impl Config {
 pub struct Instantiation {
     assignees: Vec<AbstractVal>,
     configs: Vec<Config>,
+}
+
+impl fmt::Display for Instantiation {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{:?}\n", self.assignees)?;
+        for config in &self.configs {
+            write!(formatter, "{:?}\n", config)?;
+        }
+        Ok(())
+    }
 }
 
 impl Instantiation {
