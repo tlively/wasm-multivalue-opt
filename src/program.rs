@@ -19,8 +19,8 @@ impl Type {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Inst {
     Get(u32),
-    Set(u32),
     Drop,
+    Set(u32),
     Op(Type),
     If(Program, Program),
 }
@@ -29,8 +29,8 @@ impl Inst {
     fn get_type(&self) -> Type {
         match self {
             Self::Get(_) => Type { from: 0, to: 1 },
-            Self::Set(_) => Type { from: 1, to: 0 },
             Self::Drop => Type { from: 1, to: 0 },
+            Self::Set(_) => Type { from: 1, to: 0 },
             Self::Op(t) => t.clone(),
             Self::If(e1, e2) => {
                 let (t1, t2) = (e1.get_type(), e2.get_type());
@@ -191,6 +191,13 @@ impl Program {
                     if n < max_local {
                         Inst::Get(n + 1)
                     } else if stack_type.from >= 1 {
+                        Inst::Drop
+                    } else {
+                        return None;
+                    }
+                }
+                Inst::Drop => {
+                    if stack_type.from >= 1 {
                         Inst::Set(0)
                     } else {
                         return None;
@@ -199,14 +206,9 @@ impl Program {
                 Inst::Set(n) => {
                     if stack_type.from >= 1 && n < max_local {
                         Inst::Set(n + 1)
-                    } else if stack_type.from >= 1 {
-                        Inst::Drop
-                    } else {
-                        return None;
-                    }
-                }
-                Inst::Drop => {
-                    if stack_type.from >= 2 && stack_type.to <= NUM_LOCALS {
+                    } else if stack_type.from >= 2
+                        && stack_type.to <= NUM_LOCALS
+                    {
                         Inst::Op(Type {
                             from: 2,
                             to: usize::max(stack_type.to, 1),

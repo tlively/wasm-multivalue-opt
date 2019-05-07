@@ -7,7 +7,7 @@
 mod program;
 mod values;
 
-use program::{Inst, Program, Type};
+use program::{Inst, Inst::*, Program, Type};
 use std::cmp::{Ord, Ordering};
 use std::collections::HashMap;
 use values::{AbstractVal, Config, Instantiation};
@@ -21,19 +21,19 @@ fn interpret_insts_with_config(
 ) -> Instantiation {
     match program {
         [] => Instantiation::new(config),
-        [Inst::Get(n), rest..] => {
+        [Get(n), rest..] => {
             config.stack.push(config.locals[*n as usize].clone());
             interpret_insts_with_config(rest, config)
         }
-        [Inst::Set(n), rest..] => {
+        [Set(n), rest..] => {
             config.locals[*n as usize] = config.stack.pop().unwrap();
             interpret_insts_with_config(rest, config)
         }
-        [Inst::Drop, rest..] => {
+        [Drop, rest..] => {
             config.stack.pop();
             interpret_insts_with_config(rest, config)
         }
-        [Inst::Op(Type { from, to }), rest..] => {
+        [Op(Type { from, to }), rest..] => {
             let params = {
                 let mut params = Vec::new();
                 for _ in 0..*from {
@@ -48,7 +48,7 @@ fn interpret_insts_with_config(
             }
             interpret_insts_with_config(rest, config)
         }
-        [Inst::If(left, right), rest..] => {
+        [If(left, right), rest..] => {
             let pivot = config.stack.pop().unwrap();
             let left_prog = {
                 let mut prog = left.clone();
@@ -77,7 +77,7 @@ pub fn interpret(program: &Program) -> Instantiation {
 fn has_normalized_ifs(program: &[Inst]) -> bool {
     match program {
         [] => true,
-        [Inst::If(left, right), rest..] => {
+        [If(left, right), rest..] => {
             left < right
                 && has_normalized_ifs(&left.insts)
                 && has_normalized_ifs(&right.insts)
@@ -93,31 +93,24 @@ fn has_normalized_ifs(program: &[Inst]) -> bool {
 // Get(1), Get(2), If[{Get(2)}, {Get(1), Set(1), Get(0)}]. The
 // equivalent version of this without a dead store would be
 // Get(2), Get(1), If[{Get(1)}, {Get(0)}]
-fn has_dead_store(program: &[Inst]) -> bool {
+fn has_useless_get(program: &[Inst]) -> bool {
     match program {
         [] => false,
-        [Inst::Get(a), Inst::Set(b), ..] if a == b => true,
-        [Inst::If(left, right), rest..] => {
-            has_dead_store(rest)
-                || has_dead_store(&left.insts)
-                || has_dead_store(&right.insts)
+        [Get(_), Drop, ..] => true,
+        [Get(a), Set(b), ..] if a == b => true,
+        [If(left, right), rest..] => {
+            has_useless_get(rest)
+                || has_useless_get(&left.insts)
+                || has_useless_get(&right.insts)
         }
-        [_, rest..] => has_dead_store(rest),
+        [_, rest..] => has_useless_get(rest),
     }
 }
 
 fn has_trivially_gluable_ifs(program: &[Inst]) -> bool {
     match program {
-        [.., Inst::Get(a), Inst::If(_, _), Inst::Get(b), Inst::If(_, _)]
-            if a == b =>
-        {
-            true
-        }
-        [.., Inst::Get(a), Inst::If(_, _), Inst::Get(_), Inst::Get(b), Inst::If(_, _)]
-            if a == b =>
-        {
-            true
-        }
+        [.., Get(a), If(_, _), Get(b), If(_, _)] if a == b => true,
+        [.., Get(a), If(_, _), Get(_), Get(b), If(_, _)] if a == b => true,
         _ => false,
     }
 }
@@ -129,8 +122,7 @@ fn has_trivially_gluable_ifs(program: &[Inst]) -> bool {
 fn has_trivial_opt(program: &[Inst]) -> bool {
     match program {
         [] => false,
-        [Inst::If(Program { insts: left }, Program { insts: right }), rest..] =>
-        {
+        [If(Program { insts: left }, Program { insts: right }), rest..] => {
             let mut has_opt = false;
             if let ([l, ..], [r, ..]) = (left.as_slice(), right.as_slice()) {
                 has_opt = l == r;
@@ -147,6 +139,18 @@ fn has_trivial_opt(program: &[Inst]) -> bool {
             }
         }
         [_, rest..] => has_trivial_opt(rest),
+    }
+}
+
+// If an MVP program has this form, the first get is never removed
+// from the stack, so we should filter this out in favor of the
+// othwerwise-equivalent shorter program
+fn is_too_stacky(program: &[Inst]) -> bool {
+    match program {
+        [Get(_), Get(_), If(_, _)] => true,
+        [Get(_), Get(_), Get(_), If(_, _)] => true,
+        [Get(_), Set(_), Get(_), If(_, _)] => true,
+        _ => false,
     }
 }
 
@@ -189,6 +193,8 @@ fn main() {
         }
     }
 
+    let results_count = results.len();
+
     // (difference, mvp, multivalue)
     let mut sorted_results: Vec<(usize, Program, Program)> = results
         .drain()
@@ -202,11 +208,14 @@ fn main() {
                 // apply useful filters to eliminate redundant results
                 if mvp_size <= multi_size
                     || (&mvp.insts).last() == (&multivalue.insts).last()
-                    || (&multivalue.insts).last() == Some(&Inst::Set(0))
+                    || (&multivalue.insts).last() == Some(&Set(0))
+                    || (&multivalue.insts).last()
+                        == Some(&Op(Type { from: 2, to: 1 }))
                     || has_trivial_opt(&mvp.insts)
                     || !has_normalized_ifs(&mvp.insts)
-                    || has_dead_store(&mvp.insts)
+                    || has_useless_get(&mvp.insts)
                     || has_trivially_gluable_ifs(&mvp.insts)
+                    || is_too_stacky(&mvp.insts)
                 {
                     None
                 } else {
@@ -230,7 +239,9 @@ fn main() {
         println!("Multi: {}\n", multivalue);
     }
 
-    println!("{:}", count);
+    println!("{}", count);
+    println!("{}", results_count);
+    println!("{}", sorted_results.len());
 }
 
 #[cfg(test)]
@@ -250,34 +261,29 @@ mod tests {
         // Get(1), If[{Get(2), Set(1), Get(0), Set(0)}, {}], Get(0)
         let program = Program {
             insts: vec![
-                Inst::Get(1),
-                Inst::If(
+                Get(1),
+                If(
                     Program {
-                        insts: vec![
-                            Inst::Get(2),
-                            Inst::Set(1),
-                            Inst::Get(0),
-                            Inst::Set(0),
-                        ],
+                        insts: vec![Get(2), Set(1), Get(0), Set(0)],
                     },
                     Program { insts: Vec::new() },
                 ),
-                Inst::Get(0),
+                Get(0),
             ],
         };
-        assert!(has_dead_store(&program.insts));
+        assert!(has_useless_get(&program.insts));
         assert_eq!(
             interpret(&program),
             interpret(&Program {
                 insts: vec![
-                    Inst::Get(1),
-                    Inst::If(
+                    Get(1),
+                    If(
                         Program {
-                            insts: vec![Inst::Get(2), Inst::Set(1), Inst::Drop]
+                            insts: vec![Get(2), Set(1), Drop]
                         },
                         Program { insts: Vec::new() }
                     ),
-                    Inst::Get(0)
+                    Get(0)
                 ]
             })
         );
@@ -288,19 +294,19 @@ mod tests {
         // Get(1), Get(0), If[{Get(2)}, {Get(1), Set(1), Get(0)}]
         let prog = Program {
             insts: vec![
-                Inst::Get(1),
-                Inst::Get(0),
-                Inst::If(
+                Get(1),
+                Get(0),
+                If(
                     Program {
-                        insts: vec![Inst::Get(2)],
+                        insts: vec![Get(2)],
                     },
                     Program {
-                        insts: vec![Inst::Get(1), Inst::Set(1), Inst::Get(0)],
+                        insts: vec![Get(1), Set(1), Get(0)],
                     },
                 ),
             ],
         };
-        assert!(has_dead_store(&prog.insts));
+        assert!(has_useless_get(&prog.insts));
     }
 
     #[test]
@@ -308,18 +314,13 @@ mod tests {
         // Get(0), If[{Get(0), Set(1)}, {Get(0), Set(2), Get(1), Set(0)}]
         let program = Program {
             insts: vec![
-                Inst::Get(0),
-                Inst::If(
+                Get(0),
+                If(
                     Program {
-                        insts: vec![Inst::Get(0), Inst::Set(1)],
+                        insts: vec![Get(0), Set(1)],
                     },
                     Program {
-                        insts: vec![
-                            Inst::Get(0),
-                            Inst::Set(2),
-                            Inst::Get(1),
-                            Inst::Set(0),
-                        ],
+                        insts: vec![Get(0), Set(2), Get(1), Set(0)],
                     },
                 ),
             ],
@@ -331,16 +332,16 @@ mod tests {
     fn trivial_opt_tail() {
         let program = Program {
             insts: vec![
-                Inst::Get(0),
-                Inst::If(
+                Get(0),
+                If(
                     Program {
-                        insts: vec![Inst::Get(1), Inst::Set(2)],
+                        insts: vec![Get(1), Set(2)],
                     },
                     Program {
-                        insts: vec![Inst::Get(0), Inst::Set(2)],
+                        insts: vec![Get(0), Set(2)],
                     },
                 ),
-                Inst::Get(0),
+                Get(0),
             ],
         };
         assert!(has_trivial_opt(&program.insts));
